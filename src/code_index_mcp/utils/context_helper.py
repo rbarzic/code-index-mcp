@@ -69,6 +69,14 @@ class ContextHelper:
             return 0
 
     @property
+    def profile(self) -> str:
+        """Get the active storage profile from context."""
+        try:
+            return self.ctx.request_context.lifespan_context.profile
+        except AttributeError:
+            return "default"
+
+    @property
     def index_manager(self):
         """
         Get the unified index manager from the context.
@@ -77,7 +85,9 @@ class ContextHelper:
             The UnifiedIndexManager instance, or None if not available
         """
         try:
-            return getattr(self.ctx.request_context.lifespan_context, 'index_manager', None)
+            return getattr(
+                self.ctx.request_context.lifespan_context, "index_manager", None
+            )
         except AttributeError:
             return None
 
@@ -99,8 +109,10 @@ class ContextHelper:
             Error message string if base path is invalid, None if valid
         """
         if not self.base_path:
-            return ("Project path not set. Please use set_project_path to set a "
-                    "project directory first.")
+            return (
+                "Project path not set. Please use set_project_path to set a "
+                "project directory first."
+            )
 
         if not os.path.exists(self.base_path):
             return f"Project path does not exist: {self.base_path}"
@@ -143,8 +155,16 @@ class ContextHelper:
         """
         try:
             self.ctx.request_context.lifespan_context.settings = settings
+            self.ctx.request_context.lifespan_context.profile = settings.profile
         except AttributeError:
             pass  # Context not available or doesn't support this operation
+
+    def update_profile(self, profile: str) -> None:
+        """Update the active profile in the context."""
+        try:
+            self.ctx.request_context.lifespan_context.profile = profile
+        except AttributeError:
+            pass
 
     def clear_index_cache(self) -> None:
         """
@@ -155,7 +175,7 @@ class ContextHelper:
                 self.index_manager.clear_index()
         except AttributeError:
             pass
-    
+
     def update_index_manager(self, index_manager) -> None:
         """
         Update the index manager in the context.

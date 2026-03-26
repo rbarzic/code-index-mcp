@@ -5,19 +5,22 @@ This module provides functionality for managing project settings and persistent 
 for the Code Index MCP server.
 """
 
-import hashlib
 import json
 import os
 import tempfile
 from datetime import datetime
+from typing import Any, Optional
 
 from .constants import CONFIG_FILE, INDEX_FILE, SETTINGS_DIR
+from .project_rules import load_project_rules, resolve_project_rules_path
 from .search.ag import AgStrategy
 from .search.base import SearchStrategy
 from .search.basic import BasicSearchStrategy
 from .search.grep import GrepStrategy
 from .search.ripgrep import RipgrepStrategy
 from .search.ugrep import UgrepStrategy
+from .storage_identity import compute_storage_identity, normalize_profile
+from .utils.file_filter import FileFilter
 
 # Prioritized list of search strategies
 SEARCH_STRATEGY_CLASSES = [
@@ -50,7 +53,13 @@ class ProjectSettings:
 
     custom_index_root: str | None = None
 
-    def __init__(self, base_path, skip_load=False):
+    def __init__(
+        self,
+        base_path,
+        skip_load=False,
+        filter_config_path: str | None = None,
+        profile: str | None = None,
+    ):
         """Initialize project settings
 
         Args:
@@ -59,6 +68,8 @@ class ProjectSettings:
         """
         self.base_path = base_path
         self.skip_load = skip_load
+        self.filter_config_path = filter_config_path
+        self.profile = normalize_profile(profile)
         self.available_strategies: list[SearchStrategy] = []
         self.refresh_available_strategies()
 
@@ -115,7 +126,7 @@ class ProjectSettings:
         try:
             if base_path:
                 # Use hash of project path as unique identifier
-                path_hash = hashlib.md5(base_path.encode()).hexdigest()
+                path_hash = self.get_storage_identity()
                 self.settings_path = os.path.join(temp_base_dir, path_hash)
             else:
                 # If no base path provided, use a default directory
@@ -128,15 +139,13 @@ class ProjectSettings:
                 fallback_dir = os.path.join(
                     base_path,
                     ".code_indexer",
-                    hashlib.md5(base_path.encode()).hexdigest(),
+                    self.get_storage_identity(),
                 )
             else:
                 fallback_dir = os.path.join(
                     os.path.expanduser("~"),
                     ".code_indexer",
-                    "default"
-                    if not base_path
-                    else hashlib.md5(base_path.encode()).hexdigest(),
+                    "default" if not base_path else self.get_storage_identity(),
                 )
 
             self.settings_path = fallback_dir
@@ -182,15 +191,13 @@ class ProjectSettings:
                 fallback_dir = os.path.join(
                     self.base_path,
                     ".code_indexer",
-                    hashlib.md5(self.base_path.encode()).hexdigest(),
+                    self.get_storage_identity(),
                 )
             else:
                 fallback_dir = os.path.join(
                     os.path.expanduser("~"),
                     ".code_indexer",
-                    "default"
-                    if not self.base_path
-                    else hashlib.md5(self.base_path.encode()).hexdigest(),
+                    "default" if not self.base_path else self.get_storage_identity(),
                 )
 
             self.settings_path = fallback_dir
@@ -210,6 +217,77 @@ class ProjectSettings:
                 return os.path.join(self.base_path, CONFIG_FILE)
             else:
                 return os.path.join(os.path.expanduser("~"), CONFIG_FILE)
+
+    def get_project_rules_path(self, explicit_path: str | None = None) -> Optional[str]:
+        """Get the resolved filtering config path."""
+        path, _source_type, _found = resolve_project_rules_path(
+            self.base_path,
+            explicit_path or self.filter_config_path,
+        )
+        return path
+
+    def get_storage_identity(self) -> str:
+        """Get the profile-aware storage identity for this project."""
+        return compute_storage_identity(
+            self.base_path,
+            profile=self.profile,
+            filter_config_path=self.filter_config_path,
+        )
+
+    def load_project_rules(self, explicit_path: str | None = None):
+        """Load filtering rules from the explicit path or project root."""
+        return load_project_rules(
+            self.base_path, explicit_path or self.filter_config_path
+        )
+
+    def get_effective_filter_config(
+        self,
+        explicit_path: str | None = None,
+        runtime_overrides: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        """Build the effective filtering config for the active project."""
+        compiled_rules = self.load_project_rules(explicit_path)
+        watcher_config = self.get_file_watcher_config()
+        runtime_overrides = runtime_overrides or {}
+
+        additional_excludes = []
+        for source in (
+            watcher_config.get("additional_exclude_patterns", []),
+            runtime_overrides.get("additional_exclude_patterns", []),
+        ):
+            for pattern in source or []:
+                if isinstance(pattern, str) and pattern.strip():
+                    additional_excludes.append(pattern.strip())
+
+        return {
+            "source_path": compiled_rules.source_path,
+            "source_type": compiled_rules.source_type,
+            "config_found": compiled_rules.found,
+            "include_patterns": list(compiled_rules.rules.include),
+            "exclude_patterns": list(compiled_rules.rules.exclude),
+            "include_regex": list(compiled_rules.rules.include_regex),
+            "exclude_regex": list(compiled_rules.rules.exclude_regex),
+            "compiled_include_regex": list(compiled_rules.include_regex),
+            "compiled_exclude_regex": list(compiled_rules.exclude_regex),
+            "additional_exclude_patterns": additional_excludes,
+            "supported_extensions": list(self.get_supported_extensions()),
+            "metadata": compiled_rules.to_metadata(),
+        }
+
+    def build_file_filter(
+        self,
+        explicit_path: str | None = None,
+        runtime_overrides: Optional[dict[str, Any]] = None,
+    ) -> FileFilter:
+        """Create a FileFilter using the effective filtering config."""
+        return FileFilter.from_effective_config(
+            self.get_effective_filter_config(explicit_path, runtime_overrides)
+        )
+
+    @staticmethod
+    def get_supported_extensions() -> list[str]:
+        """Get supported file extensions from the centralized filter config."""
+        return list(FileFilter().supported_extensions)
 
     def _get_timestamp(self):
         """Get current timestamp"""
@@ -418,6 +496,9 @@ class ProjectSettings:
                 "files": {},
                 "temp_dir": tempfile.gettempdir(),
                 "base_path": self.base_path,
+                "profile": self.profile,
+                "storage_identity": self.get_storage_identity(),
+                "filter_config": self.get_effective_filter_config().get("metadata", {}),
             }
 
             if stats["exists"] and stats["is_directory"]:

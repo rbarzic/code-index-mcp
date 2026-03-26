@@ -9,12 +9,17 @@ import logging
 import os
 import time
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FutureTimeoutError
+from concurrent.futures import (
+    ThreadPoolExecutor,
+    as_completed,
+    TimeoutError as FutureTimeoutError,
+)
 from typing import Dict, Iterable, List, Optional, Tuple
 
 from .json_index_builder import JSONIndexBuilder
 from .sqlite_store import SQLiteIndexStore
 from .models import FileInfo, SymbolInfo
+from ..utils.file_filter import FileFilter
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +37,9 @@ class SQLiteIndexBuilder(JSONIndexBuilder):
         project_path: str,
         store: SQLiteIndexStore,
         additional_excludes: Optional[List[str]] = None,
+        file_filter: Optional[FileFilter] = None,
     ):
-        super().__init__(project_path, additional_excludes)
+        super().__init__(project_path, additional_excludes, file_filter=file_filter)
         self.store = store
 
     def build_index(
@@ -69,7 +75,9 @@ class SQLiteIndexBuilder(JSONIndexBuilder):
 
         specialized_extensions = set(self.strategy_factory.get_specialized_extensions())
 
-        results_iter: Iterable[Tuple[Dict[str, SymbolInfo], Dict[str, FileInfo], str, bool]]
+        results_iter: Iterable[
+            Tuple[Dict[str, SymbolInfo], Dict[str, FileInfo], str, bool]
+        ]
 
         executor = None
 
@@ -79,7 +87,9 @@ class SQLiteIndexBuilder(JSONIndexBuilder):
             logger.info("Using ThreadPoolExecutor with %s workers", max_workers)
             executor = ThreadPoolExecutor(max_workers=max_workers)
             future_to_file = {
-                executor.submit(self._process_file, file_path, specialized_extensions): file_path
+                executor.submit(
+                    self._process_file, file_path, specialized_extensions
+                ): file_path
                 for file_path in files_to_process
             }
 
@@ -91,9 +101,13 @@ class SQLiteIndexBuilder(JSONIndexBuilder):
                         if result:
                             yield result
                     except FutureTimeoutError:
-                        logger.warning("Timeout processing file: %s (skipped)", file_path)
+                        logger.warning(
+                            "Timeout processing file: %s (skipped)", file_path
+                        )
                     except Exception as exc:
-                        logger.warning("Error processing file %s: %s (skipped)", file_path, exc)
+                        logger.warning(
+                            "Error processing file %s: %s (skipped)", file_path, exc
+                        )
 
             results_iter = _iter_results()
         else:
@@ -197,9 +211,7 @@ class SQLiteIndexBuilder(JSONIndexBuilder):
     def _reset_database(self, conn):
         conn.execute("DELETE FROM symbols")
         conn.execute("DELETE FROM files")
-        conn.execute(
-            "DELETE FROM metadata WHERE key NOT IN ('schema_version')"
-        )
+        conn.execute("DELETE FROM metadata WHERE key NOT IN ('schema_version')")
 
     def _insert_file(self, conn, path: str, file_info: FileInfo) -> int:
         params = (
@@ -231,8 +243,32 @@ class SQLiteIndexBuilder(JSONIndexBuilder):
         self,
         symbols: Dict[str, SymbolInfo],
         file_id: int,
-    ) -> List[Tuple[str, int, Optional[str], Optional[int], Optional[int], Optional[str], Optional[str], str, str]]:
-        rows: List[Tuple[str, int, Optional[str], Optional[int], Optional[int], Optional[str], Optional[str], str, str]] = []
+    ) -> List[
+        Tuple[
+            str,
+            int,
+            Optional[str],
+            Optional[int],
+            Optional[int],
+            Optional[str],
+            Optional[str],
+            str,
+            str,
+        ]
+    ]:
+        rows: List[
+            Tuple[
+                str,
+                int,
+                Optional[str],
+                Optional[int],
+                Optional[int],
+                Optional[str],
+                Optional[str],
+                str,
+                str,
+            ]
+        ] = []
         for symbol_id, symbol_info in symbols.items():
             called_by = json.dumps(symbol_info.called_by or [])
             short_name = symbol_id.split("::")[-1]
@@ -276,18 +312,20 @@ class SQLiteIndexBuilder(JSONIndexBuilder):
         self.store.set_metadata(conn, "index_metadata", metadata)
 
     def _resolve_pending_calls_sqlite(
-        self,
-        conn,
-        pending_calls: List[Tuple[str, str]]
+        self, conn, pending_calls: List[Tuple[str, str]]
     ) -> None:
         """Resolve cross-file call relationships directly in SQLite storage."""
         if not pending_calls:
             return
 
-        rows = list(conn.execute("SELECT symbol_id, short_name, called_by FROM symbols"))
+        rows = list(
+            conn.execute("SELECT symbol_id, short_name, called_by FROM symbols")
+        )
         symbol_map = {row["symbol_id"]: row for row in rows}
 
-        def _add_unique(mapping: Dict[str, Optional[str]], key: str, symbol_id: str) -> None:
+        def _add_unique(
+            mapping: Dict[str, Optional[str]], key: str, symbol_id: str
+        ) -> None:
             if not key:
                 return
             if key not in mapping:

@@ -4,8 +4,9 @@ Project Management Service - Business logic for project lifecycle management.
 This service handles the business logic for project initialization, configuration,
 and lifecycle management using the new JSON-based indexing system.
 """
+
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any
 from dataclasses import dataclass
 from contextlib import contextmanager
 
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ProjectInitializationResult:
     """Business result for project initialization operations."""
+
     project_path: str
     file_count: int
     index_source: str  # 'loaded_existing' or 'built_new'
@@ -44,34 +46,25 @@ class ProjectManagementService(BaseService):
         # Shallow index manager (default for initialization)
         self._shallow_manager = get_shallow_index_manager()
         from ..tools.config import ProjectConfigTool
+
         self._config_tool = ProjectConfigTool()
         # Import FileWatcherTool locally to avoid circular import
         from ..tools.monitoring import FileWatcherTool
-        self._watcher_tool = FileWatcherTool(ctx)
 
+        self._watcher_tool = FileWatcherTool(ctx)
 
     @contextmanager
     def _noop_operation(self, *_args, **_kwargs):
         yield
 
-    def _get_exclude_patterns(self) -> List[str]:
-        """Read exclude patterns from project settings for indexing.
-
-        Returns:
-            List of directory/file patterns to exclude from indexing
-        """
-        patterns: List[str] = []
+    def _build_file_filter(self):
+        """Build a shared file filter from effective project settings."""
         if not self.settings:
-            return patterns
+            return None
         try:
-            config = self.settings.get_file_watcher_config()
-            for key in ('exclude_patterns', 'additional_exclude_patterns'):
-                for pattern in config.get(key) or []:
-                    if isinstance(pattern, str) and pattern.strip():
-                        patterns.append(pattern.strip())
+            return self.settings.build_file_filter()
         except Exception:  # noqa: BLE001 - fallback if config fails
-            pass
-        return patterns
+            return None
 
     def initialize_project(self, path: str) -> str:
         """
@@ -114,7 +107,9 @@ class ProjectManagementService(BaseService):
         if error:
             raise ValueError(error)
 
-    def _execute_initialization_workflow(self, path: str) -> ProjectInitializationResult:
+    def _execute_initialization_workflow(
+        self, path: str
+    ) -> ProjectInitializationResult:
         """
         Execute the core project initialization business workflow.
 
@@ -125,7 +120,12 @@ class ProjectManagementService(BaseService):
             ProjectInitializationResult with initialization data
         """
         # Business step 1: Initialize config tool
-        self._config_tool.initialize_settings(path)
+        settings = self._config_tool.initialize_settings(
+            path,
+            filter_config_path=getattr(self.settings, "filter_config_path", None),
+            profile=getattr(self.settings, "profile", self.helper.profile),
+        )
+        self.helper.update_settings(settings)
 
         # Normalize path for consistent processing
         normalized_path = self._config_tool.normalize_project_path(path)
@@ -143,18 +143,18 @@ class ProjectManagementService(BaseService):
         monitoring_result = self._setup_file_monitoring(normalized_path)
 
         # Business step 4: Update system state
-        self._update_project_state(normalized_path, index_result['file_count'])
+        self._update_project_state(normalized_path, index_result["file_count"])
 
         # Business step 6: Get search capabilities info
         search_info = self._get_search_capabilities_info()
 
         return ProjectInitializationResult(
             project_path=normalized_path,
-            file_count=index_result['file_count'],
-            index_source=index_result['source'],
+            file_count=index_result["file_count"],
+            index_source=index_result["source"],
             search_capabilities=search_info,
             monitoring_status=monitoring_result,
-            message=f"Project initialized: {normalized_path}"
+            message=f"Project initialized: {normalized_path}",
         )
 
     def _cleanup_existing_project(self) -> None:
@@ -180,10 +180,17 @@ class ProjectManagementService(BaseService):
             Dictionary with initialization results
         """
         # Get user-configured exclude patterns
-        excludes = self._get_exclude_patterns()
+        file_filter = self._build_file_filter()
+        storage_identity = (
+            self.settings.get_storage_identity() if self.settings else None
+        )
 
         # Set project path in shallow manager with exclusions
-        if not self._shallow_manager.set_project_path(project_path, excludes):
+        if not self._shallow_manager.set_project_path(
+            project_path,
+            file_filter=file_filter,
+            storage_identity=storage_identity,
+        ):
             raise RuntimeError(f"Failed to set project path (shallow): {project_path}")
 
         # Update context
@@ -205,12 +212,11 @@ class ProjectManagementService(BaseService):
             file_count = 0
 
         return {
-            'file_count': file_count,
-            'source': source,
-            'total_symbols': 0,
-            'languages': []
+            "file_count": file_count,
+            "source": source,
+            "total_symbols": 0,
+            "languages": [],
         }
-
 
     def _is_valid_existing_index(self, index_data: Dict[str, Any]) -> bool:
         """
@@ -226,12 +232,12 @@ class ProjectManagementService(BaseService):
             return False
 
         # Business rule: Must have new format metadata
-        if 'index_metadata' not in index_data:
+        if "index_metadata" not in index_data:
             return False
 
         # Business rule: Must be compatible version
-        version = index_data.get('index_metadata', {}).get('version', '')
-        return version >= '3.0'
+        version = index_data.get("index_metadata", {}).get("version", "")
+        return version >= "3.0"
 
     def _load_existing_index(self, index_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -244,20 +250,13 @@ class ProjectManagementService(BaseService):
             Dictionary with loading results
         """
 
-
         # Note: Legacy index loading is now handled by UnifiedIndexManager
         # This method is kept for backward compatibility but functionality moved
 
         # Extract file count from metadata
-        file_count = index_data.get('project_metadata', {}).get('total_files', 0)
+        file_count = index_data.get("project_metadata", {}).get("total_files", 0)
 
-
-
-        return {
-            'file_count': file_count,
-            'source': 'loaded_existing'
-        }
-
+        return {"file_count": file_count, "source": "loaded_existing"}
 
     def _setup_file_monitoring(self, project_path: str) -> str:
         """
@@ -270,38 +269,51 @@ class ProjectManagementService(BaseService):
             String describing monitoring setup result
         """
 
-
         try:
             # Create rebuild callback that uses the JSON index manager
             def rebuild_callback():
                 logger.info("File watcher triggered rebuild callback")
                 try:
                     logger.debug(f"Starting shallow index rebuild for: {project_path}")
+                    file_filter = self._build_file_filter()
+                    storage_identity = (
+                        self.settings.get_storage_identity() if self.settings else None
+                    )
                     # Business logic: File changed, rebuild using SHALLOW index manager
                     try:
-                        if not self._shallow_manager.set_project_path(project_path):
+                        if not self._shallow_manager.set_project_path(
+                            project_path,
+                            file_filter=file_filter,
+                            storage_identity=storage_identity,
+                        ):
                             logger.warning("Shallow manager set_project_path failed")
                             return False
                         if self._shallow_manager.build_index():
                             files = self._shallow_manager.get_file_list()
-                            logger.info(f"File watcher shallow rebuild completed successfully - files {len(files)}")
+                            logger.info(
+                                f"File watcher shallow rebuild completed successfully - files {len(files)}"
+                            )
                             return True
                         else:
                             logger.warning("File watcher shallow rebuild failed")
                             return False
                     except Exception as e:
                         import traceback
+
                         logger.error(f"File watcher shallow rebuild failed: {e}")
                         logger.error(f"Traceback: {traceback.format_exc()}")
                         return False
                 except Exception as e:
                     import traceback
+
                     logger.error(f"File watcher rebuild failed: {e}")
                     logger.error(f"Traceback: {traceback.format_exc()}")
                     return False
 
             # Start monitoring using watcher tool
-            success = self._watcher_tool.start_monitoring(project_path, rebuild_callback)
+            success = self._watcher_tool.start_monitoring(
+                project_path, rebuild_callback
+            )
 
             if success:
                 # Store watcher in context for later access
@@ -320,7 +332,6 @@ class ProjectManagementService(BaseService):
     def _update_project_state(self, project_path: str, file_count: int) -> None:
         """Business logic to update system state after project initialization."""
 
-
         # Update context with file count
         self.helper.update_file_count(file_count)
 
@@ -330,7 +341,7 @@ class ProjectManagementService(BaseService):
         """Business logic to get search capabilities information."""
         search_info = self._config_tool.get_search_tool_info()
 
-        if search_info['available']:
+        if search_info["available"]:
             return f"Advanced search enabled ({search_info['name']})"
         else:
             return "Basic search available"
@@ -345,18 +356,24 @@ class ProjectManagementService(BaseService):
         Returns:
             Formatted result string for MCP response
         """
-        if result.index_source == 'unified_manager':
-            message = (f"Project path set to: {result.project_path}. "
-                      f"Initialized unified index with {result.file_count} files. "
-                      f"{result.search_capabilities}.")
-        elif result.index_source == 'failed':
-            message = (f"Project path set to: {result.project_path}. "
-                      f"Index initialization failed. Some features may be limited. "
-                      f"{result.search_capabilities}.")
+        if result.index_source == "unified_manager":
+            message = (
+                f"Project path set to: {result.project_path}. "
+                f"Initialized unified index with {result.file_count} files. "
+                f"{result.search_capabilities}."
+            )
+        elif result.index_source == "failed":
+            message = (
+                f"Project path set to: {result.project_path}. "
+                f"Index initialization failed. Some features may be limited. "
+                f"{result.search_capabilities}."
+            )
         else:
-            message = (f"Project path set to: {result.project_path}. "
-                      f"Indexed {result.file_count} files. "
-                      f"{result.search_capabilities}.")
+            message = (
+                f"Project path set to: {result.project_path}. "
+                f"Indexed {result.file_count} files. "
+                f"{result.search_capabilities}."
+            )
 
         if result.monitoring_status != "monitoring_active":
             message += " (File monitoring unavailable - use manual refresh)"
@@ -375,21 +392,48 @@ class ProjectManagementService(BaseService):
         if not self.helper.base_path:
             config_data = {
                 "status": "not_configured",
-                "message": ("Project path not set. Please use set_project_path "
-                           "to set a project directory first."),
-                "supported_extensions": SUPPORTED_EXTENSIONS
+                "message": (
+                    "Project path not set. Please use set_project_path "
+                    "to set a project directory first."
+                ),
+                "supported_extensions": SUPPORTED_EXTENSIONS,
+                "profile": getattr(
+                    self.helper.settings, "profile", self.helper.profile
+                ),
             }
             return ResponseFormatter.config_response(config_data)
 
         # Get settings stats
-        settings_stats = self.helper.settings.get_stats() if self.helper.settings else {}
+        settings_stats = (
+            self.helper.settings.get_stats() if self.helper.settings else {}
+        )
+        filter_config = (
+            self.helper.settings.get_effective_filter_config()
+            if self.helper.settings
+            else {}
+        )
 
         config_data = {
             "base_path": self.helper.base_path,
+            "profile": self.helper.settings.profile
+            if self.helper.settings
+            else self.helper.profile,
             "supported_extensions": SUPPORTED_EXTENSIONS,
             "file_count": self.helper.file_count,
-            "settings_directory": self.helper.settings.settings_path if self.helper.settings else "",
-            "settings_stats": settings_stats
+            "settings_directory": self.helper.settings.settings_path
+            if self.helper.settings
+            else "",
+            "settings_stats": settings_stats,
+            "filtering": {
+                "source_path": filter_config.get("source_path"),
+                "source_type": filter_config.get("source_type"),
+                "config_found": filter_config.get("config_found", False),
+                "include_patterns": filter_config.get("include_patterns", []),
+                "exclude_patterns": filter_config.get("exclude_patterns", []),
+                "include_regex": filter_config.get("include_regex", []),
+                "exclude_regex": filter_config.get("exclude_regex", []),
+                "metadata": filter_config.get("metadata", {}),
+            },
         }
 
         return ResponseFormatter.config_response(config_data)

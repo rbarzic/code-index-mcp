@@ -8,7 +8,6 @@ search/browsing. Content parsing and symbol extraction are not performed.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import os
@@ -19,6 +18,8 @@ import re
 
 from .json_index_builder import JSONIndexBuilder
 from ..constants import SETTINGS_DIR, INDEX_FILE_SHALLOW
+from ..storage_identity import compute_storage_identity
+from ..utils.file_filter import FileFilter
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,13 @@ class ShallowIndexManager:
         self._file_list: Optional[List[str]] = None
         self._lock = threading.RLock()
 
-    def set_project_path(self, project_path: str, additional_excludes: Optional[List[str]] = None) -> bool:
+    def set_project_path(
+        self,
+        project_path: str,
+        additional_excludes: Optional[List[str]] = None,
+        file_filter: Optional[FileFilter] = None,
+        storage_identity: Optional[str] = None,
+    ) -> bool:
         """Configure project path for shallow indexing.
 
         Args:
@@ -56,14 +63,24 @@ class ShallowIndexManager:
                     return False
 
                 self.project_path = project_path
-                self.index_builder = JSONIndexBuilder(project_path, additional_excludes)
+                self.index_builder = JSONIndexBuilder(
+                    project_path,
+                    additional_excludes,
+                    file_filter=file_filter,
+                )
 
-                project_hash = hashlib.md5(project_path.encode()).hexdigest()[:12]
-                self.temp_dir = os.path.join(tempfile.gettempdir(), SETTINGS_DIR, project_hash)
+                project_hash = storage_identity or compute_storage_identity(
+                    project_path
+                )
+                self.temp_dir = os.path.join(
+                    tempfile.gettempdir(), SETTINGS_DIR, project_hash
+                )
                 os.makedirs(self.temp_dir, exist_ok=True)
                 self.index_path = os.path.join(self.temp_dir, INDEX_FILE_SHALLOW)
                 if additional_excludes:
-                    logger.info("Shallow index additional excludes: %s", additional_excludes)
+                    logger.info(
+                        "Shallow index additional excludes: %s", additional_excludes
+                    )
                 return True
             except Exception as e:  # noqa: BLE001 - centralized logging
                 logger.error(f"Failed to set project path (shallow): {e}")
@@ -77,7 +94,7 @@ class ShallowIndexManager:
                 return False
             try:
                 file_list = self.index_builder.build_shallow_file_list()
-                with open(self.index_path, 'w', encoding='utf-8') as f:
+                with open(self.index_path, "w", encoding="utf-8") as f:
                     json.dump(file_list, f, ensure_ascii=False)
                 self._file_list = file_list
                 logger.info(f"Built shallow index with {len(file_list)} files")
@@ -92,15 +109,15 @@ class ShallowIndexManager:
             try:
                 if not self.index_path or not os.path.exists(self.index_path):
                     return False
-                with open(self.index_path, 'r', encoding='utf-8') as f:
+                with open(self.index_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 if isinstance(data, list):
                     # Normalize slashes/prefix
                     normalized: List[str] = []
                     for p in data:
                         if isinstance(p, str):
-                            q = p.replace('\\\\', '/').replace('\\', '/')
-                            if q.startswith('./'):
+                            q = p.replace("\\\\", "/").replace("\\", "/")
+                            if q.startswith("./"):
                                 q = q[2:]
                             normalized.append(q)
                     self._file_list = normalized
@@ -118,7 +135,7 @@ class ShallowIndexManager:
         with self._lock:
             if not isinstance(pattern, str):
                 return []
-            norm = (pattern.strip() or "*").replace('\\\\','/').replace('\\','/')
+            norm = (pattern.strip() or "*").replace("\\\\", "/").replace("\\", "/")
             files = self._file_list or []
 
             # Fast path: wildcard all
@@ -128,7 +145,7 @@ class ShallowIndexManager:
             # 1) Exact, case-sensitive
             exact_regex = self._compile_glob_regex(norm)
             exact_hits = [f for f in files if exact_regex.match(f) is not None]
-            if exact_hits or '/' in norm:
+            if exact_hits or "/" in norm:
                 return exact_hits
 
             # 2) Recursive **/ fallback (case-sensitive)
@@ -161,22 +178,22 @@ class ShallowIndexManager:
         special = ".^$+{}[]|()"
         while i < len(pattern):
             c = pattern[i]
-            if c == '*':
-                if i + 1 < len(pattern) and pattern[i + 1] == '*':
-                    out.append('.*')
+            if c == "*":
+                if i + 1 < len(pattern) and pattern[i + 1] == "*":
+                    out.append(".*")
                     i += 2
                     continue
                 else:
-                    out.append('[^/]*')
-            elif c == '?':
-                out.append('[^/]')
+                    out.append("[^/]*")
+            elif c == "?":
+                out.append("[^/]")
             elif c in special:
-                out.append('\\' + c)
+                out.append("\\" + c)
             else:
                 out.append(c)
             i += 1
         flags = re.IGNORECASE if ignore_case else 0
-        return re.compile('^' + ''.join(out) + '$', flags=flags)
+        return re.compile("^" + "".join(out) + "$", flags=flags)
 
     @staticmethod
     def _dedupe_preserve_order(items: List[str]) -> List[str]:
@@ -199,4 +216,3 @@ class ShallowIndexManager:
 
 # Note: get_shallow_index_manager() is now provided by project_manager_cache
 # for per-project isolation. See indexing/__init__.py
-

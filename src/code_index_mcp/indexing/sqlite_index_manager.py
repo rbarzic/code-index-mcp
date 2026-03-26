@@ -16,6 +16,8 @@ from typing import Any, Dict, List, Optional
 from .sqlite_index_builder import SQLiteIndexBuilder
 from .sqlite_store import SQLiteIndexStore, SQLiteSchemaMismatchError
 from ..constants import INDEX_FILE_DB, INDEX_FILE, INDEX_FILE_SHALLOW, SETTINGS_DIR
+from ..storage_identity import compute_storage_identity
+from ..utils.file_filter import FileFilter
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +37,13 @@ class SQLiteIndexManager:
         self._lock = threading.RLock()
         logger.info("Initialized SQLite Index Manager")
 
-    def set_project_path(self, project_path: str, additional_excludes: Optional[List[str]] = None) -> bool:
+    def set_project_path(
+        self,
+        project_path: str,
+        additional_excludes: Optional[List[str]] = None,
+        file_filter: Optional[FileFilter] = None,
+        storage_identity: Optional[str] = None,
+    ) -> bool:
         """Configure project path and underlying storage location.
 
         Args:
@@ -57,8 +65,10 @@ class SQLiteIndexManager:
                 return False
 
             self.project_path = project_path
-            project_hash = _hash_project_path(project_path)
-            self.temp_dir = os.path.join(tempfile.gettempdir(), SETTINGS_DIR, project_hash)
+            project_hash = storage_identity or compute_storage_identity(project_path)
+            self.temp_dir = os.path.join(
+                tempfile.gettempdir(), SETTINGS_DIR, project_hash
+            )
             os.makedirs(self.temp_dir, exist_ok=True)
 
             self.index_path = os.path.join(self.temp_dir, INDEX_FILE_DB)
@@ -68,11 +78,18 @@ class SQLiteIndexManager:
                     os.remove(legacy_path)
                     logger.info("Removed legacy JSON index at %s", legacy_path)
                 except OSError as exc:  # pragma: no cover - best effort
-                    logger.warning("Failed to remove legacy index %s: %s", legacy_path, exc)
+                    logger.warning(
+                        "Failed to remove legacy index %s: %s", legacy_path, exc
+                    )
 
             self.shallow_index_path = os.path.join(self.temp_dir, INDEX_FILE_SHALLOW)
             self.store = SQLiteIndexStore(self.index_path)
-            self.index_builder = SQLiteIndexBuilder(project_path, self.store, additional_excludes)
+            self.index_builder = SQLiteIndexBuilder(
+                project_path,
+                self.store,
+                additional_excludes,
+                file_filter=file_filter,
+            )
             self._is_loaded = False
             logger.info("SQLite index storage: %s", self.index_path)
             if additional_excludes:
@@ -121,7 +138,9 @@ class SQLiteIndexManager:
                 with self.store.connect() as conn:
                     metadata = self.store.get_metadata(conn, "index_metadata")
             except SQLiteSchemaMismatchError:
-                logger.info("Schema mismatch on load; forcing rebuild on next build_index()")
+                logger.info(
+                    "Schema mismatch on load; forcing rebuild on next build_index()"
+                )
                 self._is_loaded = False
                 return False
             except Exception as exc:  # pragma: no cover
@@ -142,7 +161,11 @@ class SQLiteIndexManager:
     def build_shallow_index(self) -> bool:
         """Build the shallow index file list using existing builder helper."""
         with self._lock:
-            if not self.index_builder or not self.project_path or not self.shallow_index_path:
+            if (
+                not self.index_builder
+                or not self.project_path
+                or not self.shallow_index_path
+            ):
                 logger.error("Index builder not initialized for shallow index")
                 return False
             try:
@@ -158,13 +181,17 @@ class SQLiteIndexManager:
     def load_shallow_index(self) -> bool:
         """Load shallow index from disk."""
         with self._lock:
-            if not self.shallow_index_path or not os.path.exists(self.shallow_index_path):
+            if not self.shallow_index_path or not os.path.exists(
+                self.shallow_index_path
+            ):
                 return False
             try:
                 with open(self.shallow_index_path, "r", encoding="utf-8") as handle:
                     data = json.load(handle)
                 if isinstance(data, list):
-                    self._shallow_file_list = [_normalize_path(p) for p in data if isinstance(p, str)]
+                    self._shallow_file_list = [
+                        _normalize_path(p) for p in data if isinstance(p, str)
+                    ]
                     return True
             except Exception as exc:  # pragma: no cover
                 logger.error("Failed to load shallow index: %s", exc)
@@ -274,12 +301,6 @@ class SQLiteIndexManager:
             self.index_path = None
             self._shallow_file_list = None
             self._is_loaded = False
-
-
-def _hash_project_path(project_path: str) -> str:
-    import hashlib
-
-    return hashlib.md5(project_path.encode()).hexdigest()[:12]
 
 
 def _compile_glob_regex(pattern: str):

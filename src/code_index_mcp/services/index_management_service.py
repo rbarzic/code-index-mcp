@@ -4,12 +4,13 @@ Index Management Service - Business logic for index lifecycle management.
 This service handles the business logic for index rebuilding, status monitoring,
 and index-related operations using the new JSON-based indexing system.
 """
+
 import time
 import logging
 import os
 import json
 
-from typing import Dict, Any, List
+from typing import Dict, Any
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,7 @@ from ..indexing import get_index_manager, get_shallow_index_manager, DeepIndexMa
 @dataclass
 class IndexRebuildResult:
     """Business result for index rebuild operations."""
+
     file_count: int
     rebuild_time: float
     status: str
@@ -59,11 +61,17 @@ class IndexManagementService(BaseService):
         # Business validation
         self._validate_rebuild_request()
 
-        # Get user-configured exclude patterns
-        excludes = self._get_exclude_patterns()
+        file_filter = self._build_file_filter()
+        storage_identity = (
+            self.settings.get_storage_identity() if self.settings else None
+        )
 
         # Shallow rebuild only (fast path)
-        if not self._shallow_manager.set_project_path(self.base_path, excludes):
+        if not self._shallow_manager.set_project_path(
+            self.base_path,
+            file_filter=file_filter,
+            storage_identity=storage_identity,
+        ):
             raise RuntimeError("Failed to set project path (shallow) in index manager")
         if not self._shallow_manager.build_index():
             raise RuntimeError("Failed to rebuild shallow index")
@@ -84,23 +92,23 @@ class IndexManagementService(BaseService):
         # Check if project is set up
         if not self.base_path:
             return {
-                'status': 'not_initialized',
-                'message': 'Project not initialized',
-                'is_rebuilding': False
+                "status": "not_initialized",
+                "message": "Project not initialized",
+                "is_rebuilding": False,
             }
 
         # Get index stats from the new JSON system
         stats = self._index_manager.get_index_stats()
-        
+
         return {
-            'status': 'ready' if stats.get('status') == 'loaded' else 'needs_rebuild',
-            'index_available': stats.get('status') == 'loaded',
-            'is_rebuilding': False,
-            'project_path': self.base_path,
-            'file_count': stats.get('indexed_files', 0),
-            'total_symbols': stats.get('total_symbols', 0),
-            'symbol_types': stats.get('symbol_types', {}),
-            'languages': stats.get('languages', [])
+            "status": "ready" if stats.get("status") == "loaded" else "needs_rebuild",
+            "index_available": stats.get("status") == "loaded",
+            "is_rebuilding": False,
+            "project_path": self.base_path,
+            "file_count": stats.get("indexed_files", 0),
+            "total_symbols": stats.get("total_symbols", 0),
+            "symbol_types": stats.get("symbol_types", {}),
+            "languages": stats.get("languages", []),
         }
 
     def _validate_rebuild_request(self) -> None:
@@ -113,24 +121,14 @@ class IndexManagementService(BaseService):
         # Business rule: Project must be set up
         self._require_project_setup()
 
-    def _get_exclude_patterns(self) -> List[str]:
-        """Read exclude patterns from project settings for indexing.
-
-        Returns:
-            List of directory/file patterns to exclude from indexing
-        """
-        patterns: List[str] = []
+    def _build_file_filter(self):
+        """Build a shared file filter from effective project settings."""
         if not self.settings:
-            return patterns
+            return None
         try:
-            config = self.settings.get_file_watcher_config()
-            for key in ('exclude_patterns', 'additional_exclude_patterns'):
-                for pattern in config.get(key) or []:
-                    if isinstance(pattern, str) and pattern.strip():
-                        patterns.append(pattern.strip())
+            return self.settings.build_file_filter()
         except Exception:  # noqa: BLE001 - fallback if config fails
-            pass
-        return patterns
+            return None
 
     def _execute_rebuild_workflow(self) -> IndexRebuildResult:
         """
@@ -141,11 +139,17 @@ class IndexManagementService(BaseService):
         """
         start_time = time.time()
 
-        # Get user-configured exclude patterns
-        excludes = self._get_exclude_patterns()
+        file_filter = self._build_file_filter()
+        storage_identity = (
+            self.settings.get_storage_identity() if self.settings else None
+        )
 
         # Set project path in index manager with exclusions
-        if not self._index_manager.set_project_path(self.base_path, excludes):
+        if not self._index_manager.set_project_path(
+            self.base_path,
+            file_filter=file_filter,
+            storage_identity=storage_identity,
+        ):
             raise RuntimeError("Failed to set project path in index manager")
 
         # Rebuild the index
@@ -154,17 +158,16 @@ class IndexManagementService(BaseService):
 
         # Get stats for result
         stats = self._index_manager.get_index_stats()
-        file_count = stats.get('indexed_files', 0)
+        file_count = stats.get("indexed_files", 0)
 
         rebuild_time = time.time() - start_time
 
         return IndexRebuildResult(
             file_count=file_count,
             rebuild_time=rebuild_time,
-            status='success',
-            message=f"Index rebuilt successfully with {file_count} files"
+            status="success",
+            message=f"Index rebuilt successfully with {file_count} files",
         )
-
 
     def _format_rebuild_result(self, result: IndexRebuildResult) -> str:
         """
@@ -191,11 +194,17 @@ class IndexManagementService(BaseService):
         # Ensure project is set up
         self._require_project_setup()
 
-        # Get user-configured exclude patterns
-        excludes = self._get_exclude_patterns()
+        file_filter = self._build_file_filter()
+        storage_identity = (
+            self.settings.get_storage_identity() if self.settings else None
+        )
 
         # Initialize manager with current base path and exclusions
-        if not self._shallow_manager.set_project_path(self.base_path, excludes):
+        if not self._shallow_manager.set_project_path(
+            self.base_path,
+            file_filter=file_filter,
+            storage_identity=storage_identity,
+        ):
             raise RuntimeError("Failed to set project path in index manager")
 
         # Build shallow index
@@ -205,9 +214,9 @@ class IndexManagementService(BaseService):
         # Try to report count
         count = 0
         try:
-            shallow_path = getattr(self._shallow_manager, 'index_path', None)
+            shallow_path = getattr(self._shallow_manager, "index_path", None)
             if shallow_path and os.path.exists(shallow_path):
-                with open(shallow_path, 'r', encoding='utf-8') as f:
+                with open(shallow_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     if isinstance(data, list):
                         count = len(data)

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from code_index_mcp.indexing.sqlite_index_manager import SQLiteIndexManager
 from code_index_mcp.indexing.shallow_index_manager import ShallowIndexManager
+from code_index_mcp.utils.file_filter import FileFilter
 
 
 def test_sqlite_index_manager_respects_exclude_patterns(tmp_path):
@@ -107,3 +108,32 @@ def test_exclude_patterns_with_nested_directories(tmp_path):
     # Only src/core/main.py should be indexed
     assert len(files) == 1
     assert any("main.py" in f for f in files)
+
+
+def test_shallow_index_manager_respects_include_patterns(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.py").write_text("def foo(): pass")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_main.py").write_text("def test_foo(): pass")
+
+    manager = ShallowIndexManager()
+    file_filter = FileFilter(include_patterns=["src/**/*.py"])
+    assert manager.set_project_path(str(tmp_path), file_filter=file_filter)
+    assert manager.build_index()
+
+    assert manager.get_file_list() == ["src/main.py"]
+
+
+def test_sqlite_index_manager_respects_regex_excludes(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.py").write_text("def foo(): pass")
+    (tmp_path / "legacy").mkdir()
+    (tmp_path / "legacy" / "old.py").write_text("def bar(): pass")
+
+    manager = SQLiteIndexManager()
+    file_filter = FileFilter(exclude_regex=[r"^legacy/"])
+    assert manager.set_project_path(str(tmp_path), file_filter=file_filter)
+    assert manager.build_index()
+
+    stats = manager.get_index_stats()
+    assert stats["indexed_files"] == 1

@@ -28,7 +28,7 @@ class SearchService(BaseService):
         fuzzy: bool = False,
         regex: Optional[bool] = None,
         start_index: int = 0,
-        max_results: Optional[int] = 10
+        max_results: Optional[int] = 10,
     ) -> Dict[str, Any]:
         """Search for code patterns in the project."""
         self._require_project_setup()
@@ -45,7 +45,9 @@ class SearchService(BaseService):
             if error:
                 raise ValueError(f"Invalid file pattern: {error}")
 
-        pagination_error = ValidationHelper.validate_pagination(start_index, max_results)
+        pagination_error = ValidationHelper.validate_pagination(
+            start_index, max_results
+        )
         if pagination_error:
             raise ValueError(pagination_error)
 
@@ -56,7 +58,7 @@ class SearchService(BaseService):
         if not strategy:
             raise ValueError("No search strategies available")
 
-        if regex and getattr(strategy, 'name', '').lower() == 'basic':
+        if regex and getattr(strategy, "name", "").lower() == "basic":
             raise ValueError(
                 "Regex mode requires an external search tool; "
                 "basic search only supports literal and fuzzy matching"
@@ -72,17 +74,14 @@ class SearchService(BaseService):
                 context_lines=context_lines,
                 file_pattern=file_pattern,
                 fuzzy=fuzzy,
-                regex=regex
+                regex=regex,
             )
             filtered = self._filter_results(results)
             formatted_results, pagination = self._paginate_results(
-                filtered,
-                start_index=start_index,
-                max_results=max_results
+                filtered, start_index=start_index, max_results=max_results
             )
             return ResponseFormatter.search_results_response(
-                formatted_results,
-                pagination
+                formatted_results, pagination
             )
         except Exception as exc:
             raise ValueError(f"Search failed using '{strategy.name}': {exc}") from exc
@@ -95,9 +94,11 @@ class SearchService(BaseService):
         self.settings.refresh_available_strategies()
         config = self.settings.get_search_tools_config()
 
-        available = config['available_tools']
-        preferred = config['preferred_tool']
-        return f"Search tools refreshed. Available: {available}. Preferred: {preferred}."
+        available = config["available_tools"]
+        preferred = config["preferred_tool"]
+        return (
+            f"Search tools refreshed. Available: {available}. Preferred: {preferred}."
+        )
 
     def get_search_capabilities(self) -> Dict[str, Any]:
         """Get information about search capabilities and available tools."""
@@ -105,24 +106,24 @@ class SearchService(BaseService):
             return {"error": "Settings not available"}
 
         config = self.settings.get_search_tools_config()
-        available_tools = config.get('available_tools', [])
-        supports_regex = any(tool.lower() != 'basic' for tool in available_tools)
+        available_tools = config.get("available_tools", [])
+        supports_regex = any(tool.lower() != "basic" for tool in available_tools)
 
         capabilities = {
             "available_tools": available_tools,
-            "preferred_tool": config.get('preferred_tool', 'basic'),
+            "preferred_tool": config.get("preferred_tool", "basic"),
             "supports_regex": supports_regex,
             "supports_fuzzy": True,
             "supports_case_sensitivity": True,
             "supports_context_lines": True,
-            "supports_file_patterns": True
+            "supports_file_patterns": True,
         }
 
         return capabilities
 
     def _configure_strategy(self, strategy) -> None:
         """Apply shared exclusion configuration to the strategy if supported."""
-        configure = getattr(strategy, 'configure_excludes', None)
+        configure = getattr(strategy, "configure_excludes", None)
         if not configure:
             return
 
@@ -133,40 +134,21 @@ class SearchService(BaseService):
 
     def _create_file_filter(self) -> FileFilter:
         """Build a shared file filter drawing from project settings."""
-        additional_dirs: List[str] = []
-        additional_file_patterns: List[str] = []
-
         settings = self.settings
         if settings:
             try:
-                config = settings.get_file_watcher_config()
+                return settings.build_file_filter()
             except Exception:  # pragma: no cover - fallback if config fails
-                config = {}
+                pass
 
-            for key in ('exclude_patterns', 'additional_exclude_patterns'):
-                patterns = config.get(key) or []
-                for pattern in patterns:
-                    if not isinstance(pattern, str):
-                        continue
-                    normalized = pattern.strip()
-                    if not normalized:
-                        continue
-                    additional_dirs.append(normalized)
-                    additional_file_patterns.append(normalized)
-
-        file_filter = FileFilter(additional_dirs or None)
-
-        if additional_file_patterns:
-            file_filter.exclude_files.update(additional_file_patterns)
-
-        return file_filter
+        return FileFilter()
 
     def _filter_results(self, results: Dict[str, Any]) -> Dict[str, Any]:
         """Filter out matches that reside under excluded paths."""
         if not isinstance(results, dict) or not results:
             return results
 
-        if 'error' in results or not self.file_filter or not self.base_path:
+        if "error" in results or not self.file_filter or not self.base_path:
             return results
 
         base_path = Path(self.base_path)
@@ -176,7 +158,7 @@ class SearchService(BaseService):
             if not isinstance(rel_path, str):
                 continue
 
-            normalized = Path(rel_path.replace('\\', '/'))
+            normalized = Path(rel_path.replace("\\", "/"))
             try:
                 absolute = (base_path / normalized).resolve()
             except Exception:  # pragma: no cover - invalid path safety
@@ -191,10 +173,7 @@ class SearchService(BaseService):
         return filtered
 
     def _paginate_results(
-        self,
-        results: Dict[str, Any],
-        start_index: int,
-        max_results: Optional[int]
+        self, results: Dict[str, Any], start_index: int, max_results: Optional[int]
     ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         """Apply pagination to search results and format them for responses."""
         total_matches = 0
@@ -209,7 +188,7 @@ class SearchService(BaseService):
                 total_matches=total_matches,
                 returned=0,
                 start_index=effective_start,
-                max_results=max_results
+                max_results=max_results,
             )
             return [], pagination
 
@@ -222,23 +201,25 @@ class SearchService(BaseService):
                 for path, matches in results.items()
                 if isinstance(path, str) and isinstance(matches, (list, tuple))
             ),
-            key=lambda item: item[0]
+            key=lambda item: item[0],
         )
 
         for path, matches in sorted_items:
             sorted_matches = sorted(
-                (match for match in matches if isinstance(match, (list, tuple)) and len(match) >= 2),
-                key=lambda pair: pair[0]
+                (
+                    match
+                    for match in matches
+                    if isinstance(match, (list, tuple)) and len(match) >= 2
+                ),
+                key=lambda pair: pair[0],
             )
 
             for line_number, content, *_ in sorted_matches:
                 if current_index >= effective_start:
                     if max_results is None or len(collected) < max_results:
-                        collected.append({
-                            "file": path,
-                            "line": line_number,
-                            "text": content
-                        })
+                        collected.append(
+                            {"file": path, "line": line_number, "text": content}
+                        )
                     else:
                         break
                 current_index += 1
@@ -249,16 +230,13 @@ class SearchService(BaseService):
             total_matches=total_matches,
             returned=len(collected),
             start_index=effective_start,
-            max_results=max_results
+            max_results=max_results,
         )
         return collected, pagination
 
     @staticmethod
     def _build_pagination_metadata(
-        total_matches: int,
-        returned: int,
-        start_index: int,
-        max_results: Optional[int]
+        total_matches: int, returned: int, start_index: int, max_results: Optional[int]
     ) -> Dict[str, Any]:
         """Construct pagination metadata for search responses."""
         end_index = start_index + returned
@@ -266,7 +244,7 @@ class SearchService(BaseService):
             "total_matches": total_matches,
             "returned": returned,
             "start_index": start_index,
-            "has_more": end_index < total_matches
+            "has_more": end_index < total_matches,
         }
 
         if max_results is not None:

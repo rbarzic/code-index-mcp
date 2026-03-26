@@ -18,15 +18,16 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 # Context variable for request-scoped project path
-_project_path_var: ContextVar[Optional[str]] = ContextVar(
-    'project_path', default=None
-)
+_project_path_var: ContextVar[Optional[str]] = ContextVar("project_path", default=None)
+_profile_var: ContextVar[Optional[str]] = ContextVar("profile", default=None)
 
 
 @dataclass
 class RequestContext:
     """Immutable snapshot of request context."""
+
     project_path: Optional[str] = None
+    profile: Optional[str] = None
 
 
 def get_request_project_path() -> Optional[str]:
@@ -36,6 +37,11 @@ def get_request_project_path() -> Optional[str]:
         Project path from HTTP header, or None if not set
     """
     return _project_path_var.get()
+
+
+def get_request_profile() -> Optional[str]:
+    """Get the current request's storage profile."""
+    return _profile_var.get()
 
 
 def set_request_project_path(path: Optional[str]) -> None:
@@ -49,9 +55,17 @@ def set_request_project_path(path: Optional[str]) -> None:
     _project_path_var.set(path)
 
 
+def set_request_profile(profile: Optional[str]) -> None:
+    """Set the current request's storage profile."""
+    if profile:
+        logger.debug(f"[RequestContext] Setting profile: {profile}")
+    _profile_var.set(profile)
+
+
 def clear_request_project_path() -> None:
     """Clear the current request's project path."""
     _project_path_var.set(None)
+    _profile_var.set(None)
 
 
 class RequestContextManager:
@@ -63,15 +77,20 @@ class RequestContextManager:
             pass
     """
 
-    def __init__(self, project_path: Optional[str]):
+    def __init__(self, project_path: Optional[str], profile: Optional[str] = None):
         self.project_path = project_path
+        self.profile = profile
         self._token = None
+        self._profile_token = None
 
-    def __enter__(self) -> 'RequestContextManager':
+    def __enter__(self) -> "RequestContextManager":
         self._token = _project_path_var.set(self.project_path)
+        self._profile_token = _profile_var.set(self.profile)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         if self._token is not None:
             _project_path_var.reset(self._token)
+        if self._profile_token is not None:
+            _profile_var.reset(self._profile_token)
         return None

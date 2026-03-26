@@ -12,7 +12,11 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
-from ..request_context import set_request_project_path, clear_request_project_path
+from ..request_context import (
+    set_request_project_path,
+    set_request_profile,
+    clear_request_project_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +32,7 @@ class ProjectContextMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         # Extract project path from header (case-insensitive)
         project_path = request.headers.get("mcp-project-path")
+        profile = request.headers.get("mcp-profile")
 
         if project_path:
             logger.debug(f"[Middleware] Project path from header: {project_path}")
@@ -35,6 +40,7 @@ class ProjectContextMiddleware(BaseHTTPMiddleware):
         try:
             # Set the context for this request
             set_request_project_path(project_path)
+            set_request_profile(profile)
 
             # Process the request
             response = await call_next(request)

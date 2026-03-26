@@ -13,7 +13,8 @@ from typing import Dict, Optional, Tuple
 
 from .indexing.shallow_index_manager import ShallowIndexManager
 from .indexing.sqlite_index_manager import SQLiteIndexManager
-from .request_context import get_request_project_path
+from .request_context import get_request_project_path, get_request_profile
+from .storage_identity import normalize_profile
 
 logger = logging.getLogger(__name__)
 
@@ -26,15 +27,17 @@ class ProjectManagerCache:
     """
 
     def __init__(self):
-        self._shallow_managers: Dict[str, ShallowIndexManager] = {}
-        self._sqlite_managers: Dict[str, SQLiteIndexManager] = {}
+        self._shallow_managers: Dict[Tuple[str, str], ShallowIndexManager] = {}
+        self._sqlite_managers: Dict[Tuple[str, str], SQLiteIndexManager] = {}
         self._lock = threading.RLock()
 
         # Fallback managers for when no project path is set
         self._default_shallow = ShallowIndexManager()
         self._default_sqlite = SQLiteIndexManager()
 
-    def get_shallow_manager(self, project_path: Optional[str] = None) -> ShallowIndexManager:
+    def get_shallow_manager(
+        self, project_path: Optional[str] = None
+    ) -> ShallowIndexManager:
         """Get or create a ShallowIndexManager for the given project path.
 
         Args:
@@ -45,18 +48,24 @@ class ProjectManagerCache:
         """
         # Use request context if no explicit path provided
         path = project_path or get_request_project_path()
+        profile = normalize_profile(get_request_profile())
 
         if not path:
             return self._default_shallow
 
         with self._lock:
-            if path not in self._shallow_managers:
-                logger.info(f"[Cache] Creating ShallowIndexManager for: {path}")
+            key = (path, profile)
+            if key not in self._shallow_managers:
+                logger.info(
+                    "[Cache] Creating ShallowIndexManager for: %s [%s]", path, profile
+                )
                 manager = ShallowIndexManager()
-                self._shallow_managers[path] = manager
-            return self._shallow_managers[path]
+                self._shallow_managers[key] = manager
+            return self._shallow_managers[key]
 
-    def get_sqlite_manager(self, project_path: Optional[str] = None) -> SQLiteIndexManager:
+    def get_sqlite_manager(
+        self, project_path: Optional[str] = None
+    ) -> SQLiteIndexManager:
         """Get or create a SQLiteIndexManager for the given project path.
 
         Args:
@@ -67,18 +76,24 @@ class ProjectManagerCache:
         """
         # Use request context if no explicit path provided
         path = project_path or get_request_project_path()
+        profile = normalize_profile(get_request_profile())
 
         if not path:
             return self._default_sqlite
 
         with self._lock:
-            if path not in self._sqlite_managers:
-                logger.info(f"[Cache] Creating SQLiteIndexManager for: {path}")
+            key = (path, profile)
+            if key not in self._sqlite_managers:
+                logger.info(
+                    "[Cache] Creating SQLiteIndexManager for: %s [%s]", path, profile
+                )
                 manager = SQLiteIndexManager()
-                self._sqlite_managers[path] = manager
-            return self._sqlite_managers[path]
+                self._sqlite_managers[key] = manager
+            return self._sqlite_managers[key]
 
-    def get_managers(self, project_path: Optional[str] = None) -> Tuple[ShallowIndexManager, SQLiteIndexManager]:
+    def get_managers(
+        self, project_path: Optional[str] = None
+    ) -> Tuple[ShallowIndexManager, SQLiteIndexManager]:
         """Get both managers for a project path.
 
         Args:
@@ -89,7 +104,7 @@ class ProjectManagerCache:
         """
         return (
             self.get_shallow_manager(project_path),
-            self.get_sqlite_manager(project_path)
+            self.get_sqlite_manager(project_path),
         )
 
     def clear_project(self, project_path: str) -> None:
@@ -99,12 +114,14 @@ class ProjectManagerCache:
             project_path: Project path to clear
         """
         with self._lock:
-            if project_path in self._shallow_managers:
-                self._shallow_managers[project_path].cleanup()
-                del self._shallow_managers[project_path]
-            if project_path in self._sqlite_managers:
-                self._sqlite_managers[project_path].cleanup()
-                del self._sqlite_managers[project_path]
+            for key in [
+                key for key in self._shallow_managers if key[0] == project_path
+            ]:
+                self._shallow_managers[key].cleanup()
+                del self._shallow_managers[key]
+            for key in [key for key in self._sqlite_managers if key[0] == project_path]:
+                self._sqlite_managers[key].cleanup()
+                del self._sqlite_managers[key]
             logger.info(f"[Cache] Cleared managers for: {project_path}")
 
     def clear_all(self) -> None:
@@ -130,8 +147,8 @@ class ProjectManagerCache:
         """
         with self._lock:
             # Union of both caches
-            paths = set(self._shallow_managers.keys())
-            paths.update(self._sqlite_managers.keys())
+            paths = {path for path, _profile in self._shallow_managers.keys()}
+            paths.update(path for path, _profile in self._sqlite_managers.keys())
             return sorted(paths)
 
 

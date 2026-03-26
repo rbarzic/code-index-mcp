@@ -151,11 +151,30 @@ class SettingsService(BaseService):
                 status="not_configured",
                 message="Project path not set. Please use set_project_path to set a "
                 "project directory first.",
+                profile=getattr(self.settings, "profile", "default")
+                if self.settings
+                else "default",
             )
 
         # Get config and stats
         config = self.settings.load_config() if self.settings else {}
         stats = self.settings.get_stats() if self.settings else {}
+        filter_config = (
+            self.settings.get_effective_filter_config() if self.settings else {}
+        )
+        if config is None:
+            config = {}
+        if filter_config:
+            config["filtering"] = {
+                "source_path": filter_config.get("source_path"),
+                "source_type": filter_config.get("source_type"),
+                "config_found": filter_config.get("config_found", False),
+                "include_patterns": filter_config.get("include_patterns", []),
+                "exclude_patterns": filter_config.get("exclude_patterns", []),
+                "include_regex": filter_config.get("include_regex", []),
+                "exclude_regex": filter_config.get("exclude_regex", []),
+                "metadata": filter_config.get("metadata", {}),
+            }
         settings_directory = actual_temp_dir
         exists = os.path.exists(settings_directory) if settings_directory else False
 
@@ -166,7 +185,38 @@ class SettingsService(BaseService):
             config=config,
             stats=stats,
             exists=exists,
+            profile=self.settings.profile if self.settings else "default",
         )
+
+    def get_filtering_config(self) -> dict[str, Any]:
+        """Get the resolved effective filtering configuration."""
+        if not self.settings:
+            return {
+                "status": "not_configured",
+                "message": "Project path not set. Please use set_project_path first.",
+                "filtering": {},
+            }
+
+        filter_config = self.settings.get_effective_filter_config()
+        return {
+            "status": "configured",
+            "base_path": self.base_path,
+            "profile": self.settings.profile,
+            "filtering": {
+                "source_path": filter_config.get("source_path"),
+                "source_type": filter_config.get("source_type"),
+                "config_found": filter_config.get("config_found", False),
+                "include_patterns": filter_config.get("include_patterns", []),
+                "exclude_patterns": filter_config.get("exclude_patterns", []),
+                "include_regex": filter_config.get("include_regex", []),
+                "exclude_regex": filter_config.get("exclude_regex", []),
+                "additional_exclude_patterns": filter_config.get(
+                    "additional_exclude_patterns", []
+                ),
+                "supported_extensions": filter_config.get("supported_extensions", []),
+                "metadata": filter_config.get("metadata", {}),
+            },
+        }
 
     def clear_all_settings(self) -> str:
         """

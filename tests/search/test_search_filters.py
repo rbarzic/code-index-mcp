@@ -1,4 +1,5 @@
 """Tests covering shared search filtering behaviour."""
+
 import os
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -8,7 +9,7 @@ import sys
 import pytest
 
 ROOT = _TestPath(__file__).resolve().parents[2]
-SRC_PATH = ROOT / 'src'
+SRC_PATH = ROOT / "src"
 if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
 
@@ -22,11 +23,11 @@ def test_basic_strategy_skips_excluded_directories(tmp_path):
     base = tmp_path
     src_dir = base / "src"
     src_dir.mkdir()
-    (src_dir / 'app.js').write_text("const db = 'mongo';\n")
+    (src_dir / "app.js").write_text("const db = 'mongo';\n")
 
     node_modules_dir = base / "node_modules" / "pkg"
     node_modules_dir.mkdir(parents=True)
-    (node_modules_dir / 'index.js').write_text("// mongo dependency\n")
+    (node_modules_dir / "index.js").write_text("// mongo dependency\n")
 
     strategy = BasicSearchStrategy()
     strategy.configure_excludes(FileFilter())
@@ -50,6 +51,24 @@ def test_basic_strategy_rejects_regex_mode_without_external_tool(tmp_path):
         strategy.search("hello.*world", str(tmp_path), regex=True)
 
 
+def test_basic_strategy_respects_include_patterns(tmp_path):
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "app.py").write_text("mongo\n")
+
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_app.py").write_text("mongo\n")
+
+    strategy = BasicSearchStrategy()
+    strategy.configure_excludes(FileFilter(include_patterns=["src/**/*.py"]))
+
+    results = strategy.search("mongo", str(tmp_path), case_sensitive=False)
+
+    assert os.path.join("src", "app.py") in results
+    assert os.path.join("tests", "test_app.py") not in results
+
+
 @patch("code_index_mcp.search.ripgrep.subprocess.run")
 def test_ripgrep_strategy_adds_exclude_globs(mock_run, tmp_path):
     mock_run.return_value = SimpleNamespace(returncode=0, stdout="", stderr="")
@@ -60,13 +79,17 @@ def test_ripgrep_strategy_adds_exclude_globs(mock_run, tmp_path):
     strategy.search("mongo", str(tmp_path))
 
     cmd = mock_run.call_args[0][0]
-    glob_args = [cmd[i + 1] for i, arg in enumerate(cmd) if arg == '--glob' and i + 1 < len(cmd)]
+    glob_args = [
+        cmd[i + 1] for i, arg in enumerate(cmd) if arg == "--glob" and i + 1 < len(cmd)
+    ]
 
-    assert any(value.startswith('!**/node_modules/') for value in glob_args)
+    assert any(value.startswith("!**/node_modules/") for value in glob_args)
 
 
 @patch("code_index_mcp.search.grep.subprocess.run")
-def test_grep_strategy_treats_regex_chars_as_literal_without_regex_mode(mock_run, tmp_path):
+def test_grep_strategy_treats_regex_chars_as_literal_without_regex_mode(
+    mock_run, tmp_path
+):
     mock_run.return_value = SimpleNamespace(returncode=0, stdout="", stderr="")
 
     strategy = GrepStrategy()
@@ -74,5 +97,5 @@ def test_grep_strategy_treats_regex_chars_as_literal_without_regex_mode(mock_run
 
     cmd = mock_run.call_args[0][0]
 
-    assert '-F' in cmd
-    assert '-E' not in cmd
+    assert "-F" in cmd
+    assert "-E" not in cmd

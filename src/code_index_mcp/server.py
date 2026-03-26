@@ -73,14 +73,19 @@ class FIFOConcurrencyLimiter:
             # Wait until it's our turn AND there's capacity
             start = time.monotonic()
 
-            while self._serving_ticket != my_ticket or self._active_count >= self._max_concurrent:
+            while (
+                self._serving_ticket != my_ticket
+                or self._active_count >= self._max_concurrent
+            ):
                 remaining = timeout - (time.monotonic() - start)
                 if remaining <= 0:
                     # Timeout: skip our ticket so others can proceed
                     if self._serving_ticket == my_ticket:
                         self._serving_ticket += 1
                         self._condition.notify_all()
-                    raise TimeoutError(f"Queue timeout after {timeout}s (ticket {my_ticket})")
+                    raise TimeoutError(
+                        f"Queue timeout after {timeout}s (ticket {my_ticket})"
+                    )
 
                 self._condition.wait(timeout=min(remaining, 1.0))
 
@@ -105,7 +110,7 @@ class FIFOConcurrencyLimiter:
                 "max_concurrent": self._max_concurrent,
                 "next_ticket": self._next_ticket,
                 "serving_ticket": self._serving_ticket,
-                "queued": self._next_ticket - self._serving_ticket
+                "queued": self._next_ticket - self._serving_ticket,
             }
 
 
@@ -117,6 +122,7 @@ _concurrency_limiter = FIFOConcurrencyLimiter(MAX_CONCURRENT_REQUESTS)
 # We ignore SIGINT to maintain stability for the original session
 def _setup_signal_handlers():
     """Setup signal handlers for multi-session stability."""
+
     def sigint_handler(signum, frame):
         # Log but don't exit - let the MCP server continue serving
         logging.getLogger(__name__).warning(
@@ -125,38 +131,41 @@ def _setup_signal_handlers():
 
     def sigterm_handler(signum, frame):
         # SIGTERM is a polite termination request - we should honor it
-        logging.getLogger(__name__).info(
-            "Received SIGTERM - shutting down gracefully"
-        )
+        logging.getLogger(__name__).info("Received SIGTERM - shutting down gracefully")
         sys.exit(0)
 
     # Windows doesn't have SIGINT the same way, but we handle it anyway
-    if hasattr(signal, 'SIGINT'):
+    if hasattr(signal, "SIGINT"):
         signal.signal(signal.SIGINT, sigint_handler)
-    if hasattr(signal, 'SIGTERM'):
+    if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, sigterm_handler)
+
 
 _setup_signal_handlers()
 
 
 def with_concurrency_limit(func):
     """Decorator to limit concurrent tool executions with FIFO ordering."""
+
     @wraps(func)
     def wrapper(*args, **kwargs):
         try:
             _concurrency_limiter.acquire()
         except TimeoutError as e:
             # Return error dict instead of crashing
-            logging.getLogger(__name__).warning("Queue timeout for %s: %s", func.__name__, e)
+            logging.getLogger(__name__).warning(
+                "Queue timeout for %s: %s", func.__name__, e
+            )
             return {
                 "status": "error",
                 "error": "queue_timeout",
-                "message": f"Server busy, request queued too long. Please retry. ({e})"
+                "message": f"Server busy, request queued too long. Please retry. ({e})",
             }
         try:
             return func(*args, **kwargs)
         finally:
             _concurrency_limiter.release()
+
     return wrapper
 
 
@@ -193,6 +202,8 @@ class CodeIndexerContext:
     settings: ProjectSettings
     file_count: int = 0
     file_watcher_service: FileWatcherService = None
+    filter_config_path: str | None = None
+    profile: str = "default"
 
 
 @dataclass
@@ -200,6 +211,8 @@ class _CLIConfig:
     """Holds CLI configuration for bootstrap operations."""
 
     project_path: str | None = None
+    filter_config_path: str | None = None
+    profile: str = "default"
 
 
 class _BootstrapRequestContext:
@@ -221,11 +234,20 @@ async def indexer_lifespan(_server: FastMCP) -> AsyncIterator[CodeIndexerContext
     base_path = ""  # Empty string to indicate no path is set
 
     # Initialize settings manager with skip_load=True to skip loading files
-    settings = ProjectSettings(base_path, skip_load=True)
+    settings = ProjectSettings(
+        base_path,
+        skip_load=True,
+        filter_config_path=_CLI_CONFIG.filter_config_path,
+        profile=_CLI_CONFIG.profile,
+    )
 
     # Initialize context - file watcher will be initialized later when project path is set
     context = CodeIndexerContext(
-        base_path=base_path, settings=settings, file_watcher_service=None
+        base_path=base_path,
+        settings=settings,
+        file_watcher_service=None,
+        filter_config_path=_CLI_CONFIG.filter_config_path,
+        profile=_CLI_CONFIG.profile,
     )
 
     try:
@@ -292,10 +314,10 @@ def search_code_advanced(
     max_results: int | None = 10,
 ) -> dict[str, Any]:
     """
-Search for code pattern with pagination. Auto-selects best search tool (ugrep/ripgrep/ag/grep).
-Supports glob file_pattern (e.g., "*.py"), explicit regex mode, and fuzzy matching (ugrep only).
-Regex matching requires passing regex=True and may require an external search tool.
-"""
+    Search for code pattern with pagination. Auto-selects best search tool (ugrep/ripgrep/ag/grep).
+    Supports glob file_pattern (e.g., "*.py"), explicit regex mode, and fuzzy matching (ugrep only).
+    Regex matching requires passing regex=True and may require an external search tool.
+    """
     return SearchService(ctx).search_code(
         pattern=pattern,
         case_sensitive=case_sensitive,
@@ -312,9 +334,9 @@ Regex matching requires passing regex=True and may require an external search to
 @handle_mcp_tool_errors(return_type="list")
 def find_files(pattern: str, ctx: Context) -> list[str]:
     """
-Find files matching glob pattern using in-memory index.
-Supports path patterns (*.py, test_*.js) and filename-only matching (README.md).
-"""
+    Find files matching glob pattern using in-memory index.
+    Supports path patterns (*.py, test_*.js) and filename-only matching (README.md).
+    """
     return FileDiscoveryService(ctx).find_files(pattern)
 
 
@@ -365,8 +387,8 @@ def get_symbol_body(file_path: str, symbol_name: str, ctx: Context) -> dict[str,
 @handle_mcp_tool_errors(return_type="str")
 def refresh_index(ctx: Context) -> str:
     """
-Manually rebuild the project file index. Use after git operations or when index seems stale.
-"""
+    Manually rebuild the project file index. Use after git operations or when index seems stale.
+    """
     return IndexManagementService(ctx).rebuild_index()
 
 
@@ -387,6 +409,13 @@ def build_deep_index(ctx: Context) -> str:
 def get_settings_info(ctx: Context) -> dict[str, Any]:
     """Get information about the project settings."""
     return SettingsService(ctx).get_settings_info()
+
+
+@mcp.tool()
+@handle_mcp_tool_errors(return_type="dict")
+def get_filtering_config(ctx: Context) -> dict[str, Any]:
+    """Get the resolved effective filtering configuration."""
+    return SettingsService(ctx).get_filtering_config()
 
 
 @mcp.tool()
@@ -466,6 +495,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Set the project path on startup (equivalent to calling set_project_path).",
     )
     parser.add_argument(
+        "--profile",
+        dest="profile",
+        default="default",
+        help="Storage profile name used to isolate indexes for the same project path.",
+    )
+    parser.add_argument(
         "--transport",
         choices=["stdio", "sse", "streamable-http"],
         default="stdio",
@@ -476,6 +511,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         dest="mount_path",
         default=None,
         help="Mount path when using SSE transport.",
+    )
+    parser.add_argument(
+        "--filter-config",
+        dest="filter_config",
+        default=None,
+        help="Path to a JSON filtering config file. Overrides repo-local auto-discovery.",
     )
     parser.add_argument(
         "--indexer-path",
@@ -490,10 +531,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Prefix to add to all tool names (e.g., 'prefix:' -> 'prefix:tool_name').",
     )
     parser.add_argument(
-        "--port",
-        type=int,
-        default=8000,
-        help="Port for SSE transport (default: 8000)."
+        "--port", type=int, default=8000, help="Port for SSE transport (default: 8000)."
     )
     return parser.parse_args(argv)
 
@@ -504,6 +542,19 @@ def main(argv: list[str] | None = None):
 
     # Store CLI configuration for lifespan bootstrap.
     _CLI_CONFIG.project_path = args.project_path
+    _CLI_CONFIG.filter_config_path = (
+        os.path.abspath(args.filter_config) if args.filter_config else None
+    )
+    _CLI_CONFIG.profile = (args.profile or "default").strip() or "default"
+
+    if _CLI_CONFIG.filter_config_path and not os.path.exists(
+        _CLI_CONFIG.filter_config_path
+    ):
+        logger.error(
+            "Filtering config path does not exist: %s",
+            _CLI_CONFIG.filter_config_path,
+        )
+        sys.exit(1)
 
     # Configure custom index root if provided
     if args.indexer_path:
