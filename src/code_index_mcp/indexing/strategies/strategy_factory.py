@@ -10,6 +10,7 @@ from .javascript_strategy import JavaScriptParsingStrategy
 from .typescript_strategy import TypeScriptParsingStrategy
 from .java_strategy import JavaParsingStrategy
 from .kotlin_strategy import KotlinParsingStrategy
+from .c_strategy import CParsingStrategy
 from .csharp_strategy import CSharpParsingStrategy
 from .go_strategy import GoParsingStrategy
 from .objective_c_strategy import ObjectiveCParsingStrategy
@@ -30,70 +31,107 @@ class StrategyFactory:
         # File type mappings for fallback parser
         self._file_type_mappings = {
             # Web and markup
-            '.html': 'html', '.htm': 'html',
-            '.css': 'css', '.scss': 'css', '.sass': 'css',
-            '.less': 'css', '.stylus': 'css', '.styl': 'css',
-            '.md': 'markdown', '.mdx': 'markdown',
-            '.json': 'json', '.jsonc': 'json',
-            '.xml': 'xml',
-            '.yml': 'yaml', '.yaml': 'yaml',
-
+            ".html": "html",
+            ".htm": "html",
+            ".css": "css",
+            ".scss": "css",
+            ".sass": "css",
+            ".less": "css",
+            ".stylus": "css",
+            ".styl": "css",
+            ".md": "markdown",
+            ".mdx": "markdown",
+            ".json": "json",
+            ".jsonc": "json",
+            ".xml": "xml",
+            ".yml": "yaml",
+            ".yaml": "yaml",
             # Frontend frameworks
-            '.vue': 'vue',
-            '.svelte': 'svelte',
-            '.astro': 'astro',
-
+            ".vue": "vue",
+            ".svelte": "svelte",
+            ".astro": "astro",
             # Template engines
-            '.hbs': 'handlebars', '.handlebars': 'handlebars',
-            '.ejs': 'ejs',
-            '.pug': 'pug',
-
+            ".hbs": "handlebars",
+            ".handlebars": "handlebars",
+            ".ejs": "ejs",
+            ".pug": "pug",
             # Database and SQL
-            '.sql': 'sql', '.ddl': 'sql', '.dml': 'sql',
-            '.mysql': 'sql', '.postgresql': 'sql', '.psql': 'sql',
-            '.sqlite': 'sql', '.mssql': 'sql', '.oracle': 'sql',
-            '.ora': 'sql', '.db2': 'sql',
-            '.proc': 'sql', '.procedure': 'sql',
-            '.func': 'sql', '.function': 'sql',
-            '.view': 'sql', '.trigger': 'sql', '.index': 'sql',
-            '.migration': 'sql', '.seed': 'sql', '.fixture': 'sql',
-            '.schema': 'sql',
-            '.cql': 'sql', '.cypher': 'sql', '.sparql': 'sql',
-            '.gql': 'graphql',
-            '.liquibase': 'sql', '.flyway': 'sql',
-
+            ".sql": "sql",
+            ".ddl": "sql",
+            ".dml": "sql",
+            ".mysql": "sql",
+            ".postgresql": "sql",
+            ".psql": "sql",
+            ".sqlite": "sql",
+            ".mssql": "sql",
+            ".oracle": "sql",
+            ".ora": "sql",
+            ".db2": "sql",
+            ".proc": "sql",
+            ".procedure": "sql",
+            ".func": "sql",
+            ".function": "sql",
+            ".view": "sql",
+            ".trigger": "sql",
+            ".index": "sql",
+            ".migration": "sql",
+            ".seed": "sql",
+            ".fixture": "sql",
+            ".schema": "sql",
+            ".cql": "sql",
+            ".cypher": "sql",
+            ".sparql": "sql",
+            ".gql": "graphql",
+            ".liquibase": "sql",
+            ".flyway": "sql",
             # Config and text files
-            '.txt': 'text',
-            '.ini': 'config', '.cfg': 'config', '.conf': 'config',
-            '.toml': 'config',
-            '.properties': 'config',
-            '.env': 'config',
-            '.gitignore': 'config',
-            '.dockerignore': 'config',
-            '.editorconfig': 'config',
-
+            ".txt": "text",
+            ".ini": "config",
+            ".cfg": "config",
+            ".conf": "config",
+            ".toml": "config",
+            ".properties": "config",
+            ".env": "config",
+            ".gitignore": "config",
+            ".dockerignore": "config",
+            ".editorconfig": "config",
             # Other programming languages (will use fallback)
-            '.c': 'c', '.cpp': 'cpp', '.h': 'h', '.hpp': 'hpp',
-            '.cxx': 'cpp', '.cc': 'cpp', '.hxx': 'hpp', '.hh': 'hpp',
-            '.cs': 'csharp',
-            '.rb': 'ruby',
-            '.php': 'php',
-            '.swift': 'swift',
-            '.kt': 'kotlin', '.kts': 'kotlin',
-            '.rs': 'rust',
-            '.scala': 'scala',
-            '.sh': 'shell', '.bash': 'shell', '.zsh': 'shell',
-            '.ps1': 'powershell',
-            '.bat': 'batch', '.cmd': 'batch',
-            '.r': 'r', '.R': 'r',
-            '.pl': 'perl', '.pm': 'perl',
-            '.lua': 'lua',
-            '.dart': 'dart',
-            '.hs': 'haskell',
-            '.ml': 'ocaml', '.mli': 'ocaml',
-            '.fs': 'fsharp', '.fsx': 'fsharp',
-            '.clj': 'clojure', '.cljs': 'clojure',
-            '.vim': 'vim',
+            ".c": "c",
+            ".cpp": "cpp",
+            ".h": "h",
+            ".hpp": "hpp",
+            ".cxx": "cpp",
+            ".cc": "cpp",
+            ".hxx": "hpp",
+            ".hh": "hpp",
+            ".cs": "csharp",
+            ".rb": "ruby",
+            ".php": "php",
+            ".swift": "swift",
+            ".kt": "kotlin",
+            ".kts": "kotlin",
+            ".rs": "rust",
+            ".scala": "scala",
+            ".sh": "shell",
+            ".bash": "shell",
+            ".zsh": "shell",
+            ".ps1": "powershell",
+            ".bat": "batch",
+            ".cmd": "batch",
+            ".r": "r",
+            ".R": "r",
+            ".pl": "perl",
+            ".pm": "perl",
+            ".lua": "lua",
+            ".dart": "dart",
+            ".hs": "haskell",
+            ".ml": "ocaml",
+            ".mli": "ocaml",
+            ".fs": "fsharp",
+            ".fsx": "fsharp",
+            ".clj": "clojure",
+            ".cljs": "clojure",
+            ".vim": "vim",
         }
 
     def _initialize_strategies(self):
@@ -101,7 +139,7 @@ class StrategyFactory:
         with self._lock:
             if self._initialized:
                 return
-                
+
             try:
                 # Python
                 python_strategy = PythonParsingStrategy()
@@ -128,6 +166,11 @@ class StrategyFactory:
                 for ext in kotlin_strategy.get_supported_extensions():
                     self._strategies[ext] = kotlin_strategy
 
+                # C
+                c_strategy = CParsingStrategy()
+                for ext in c_strategy.get_supported_extensions():
+                    self._strategies[ext] = c_strategy
+
                 # C#
                 csharp_strategy = CSharpParsingStrategy()
                 for ext in csharp_strategy.get_supported_extensions():
@@ -146,9 +189,9 @@ class StrategyFactory:
                 zig_strategy = ZigParsingStrategy()
                 for ext in zig_strategy.get_supported_extensions():
                     self._strategies[ext] = zig_strategy
-                    
+
                 self._initialized = True
-                
+
             except Exception as e:
                 # Reset state on failure to allow retry
                 self._strategies.clear()
@@ -169,13 +212,13 @@ class StrategyFactory:
             # Ensure initialization is complete
             if not self._initialized:
                 self._initialize_strategies()
-            
+
             # Check for specialized strategies first
             if file_extension in self._strategies:
                 return self._strategies[file_extension]
 
             # Use fallback strategy with appropriate language name
-            language_name = self._file_type_mappings.get(file_extension, 'unknown')
+            language_name = self._file_type_mappings.get(file_extension, "unknown")
             return FallbackParsingStrategy(language_name)
 
     def get_all_supported_extensions(self) -> List[str]:
@@ -206,7 +249,11 @@ class StrategyFactory:
         # Add fallback info
         fallback_languages = set(self._file_type_mappings.values())
         for lang in fallback_languages:
-            extensions = [ext for ext, mapped_lang in self._file_type_mappings.items() if mapped_lang == lang]
+            extensions = [
+                ext
+                for ext, mapped_lang in self._file_type_mappings.items()
+                if mapped_lang == lang
+            ]
             info[f"fallback_{lang}"] = extensions
 
         return info
