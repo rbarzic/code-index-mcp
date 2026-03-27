@@ -37,6 +37,8 @@ Thumbs.db
 
 # Code Index MCP specific files
 .code_indexer/
+.code-index.json
+.code-index-opposite.json
 
 
 # Claude Code generated files
