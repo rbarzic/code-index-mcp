@@ -51,3 +51,40 @@ int run_mode(Mode mode);
     assert symbols["sample.h::run_mode"].type == "function"
     assert "Mode" in file_info.symbols["classes"]
     assert "run_mode" in file_info.symbols["functions"]
+
+
+def test_c_strategy_indexes_macros():
+    strategy = CParsingStrategy()
+    content = """
+#define MAX_COUNT 32
+#define SQR(x) ((x) * (x))
+"""
+
+    symbols, file_info = strategy.parse_file("macros.h", content)
+
+    assert "macros.h::MAX_COUNT" in symbols
+    assert symbols["macros.h::MAX_COUNT"].type == "macro"
+    assert "macros.h::SQR" in symbols
+    assert symbols["macros.h::SQR"].type == "macro"
+    assert "MAX_COUNT" in file_info.symbols["classes"]
+    assert "SQR" in file_info.symbols["classes"]
+
+
+def test_c_strategy_tracks_function_call_relationships():
+    strategy = CParsingStrategy()
+    content = """
+int helper(void) {
+    return 1;
+}
+
+int run(void) {
+    return helper();
+}
+"""
+
+    symbols, file_info = strategy.parse_file("calls.c", content)
+
+    assert "calls.c::helper" in symbols
+    assert "calls.c::run" in symbols
+    assert symbols["calls.c::helper"].called_by == ["calls.c::run"]
+    assert not hasattr(file_info, "pending_calls") or file_info.pending_calls == []
