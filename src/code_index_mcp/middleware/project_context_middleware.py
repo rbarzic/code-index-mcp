@@ -13,9 +13,10 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from ..request_context import (
-    set_request_project_path,
+    reset_request_profile,
+    reset_request_project_path,
     set_request_profile,
-    clear_request_project_path,
+    set_request_project_path,
 )
 
 logger = logging.getLogger(__name__)
@@ -37,15 +38,15 @@ class ProjectContextMiddleware(BaseHTTPMiddleware):
         if project_path:
             logger.debug(f"[Middleware] Project path from header: {project_path}")
 
-        try:
-            # Set the context for this request
-            set_request_project_path(project_path)
-            set_request_profile(profile)
+        token = set_request_project_path(project_path)
+        profile_token = set_request_profile(profile)
 
+        try:
             # Process the request
             response = await call_next(request)
 
             return response
         finally:
-            # Clear context after request completes
-            clear_request_project_path()
+            # Restore any previous context after request completes
+            reset_request_project_path(token)
+            reset_request_profile(profile_token)

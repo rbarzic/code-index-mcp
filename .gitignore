@@ -53,3 +53,9 @@ RELEASE_NOTE.txt
 
 .llm-context/
 AGENTS.md
+
+# Java / Maven / Eclipse generated
+.classpath
+.project
+.settings/
+target/
